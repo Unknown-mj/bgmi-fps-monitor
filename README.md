@@ -170,6 +170,7 @@ tools/               PowerShell build and test scripts, awk filter
 
 ## Credits and licence
 
+- App icon ("FPM" with a meter bar): original artwork drawn for this project from plain shapes, no font or third-party logo, covered by the project's MIT licence.
 - Font: [Rajdhani](https://github.com/google/fonts/tree/main/ofl/rajdhani) by Indian Type Foundry, SIL Open Font License 1.1 (subset; see `android/third_party/rajdhani/`).
 - Uses [Shizuku](https://github.com/RikkaApps/Shizuku) (API library, Apache 2.0).
 - This project's own code: [MIT License](LICENSE), © 2026 Unknown-mj.

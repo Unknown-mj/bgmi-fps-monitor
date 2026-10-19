@@ -1,27 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Single-colour version for Android 13+ themed icons (colour comes from the wallpaper). -->
+<!-- Single-colour "FPM" for Android 13+ themed icons (colour comes from the wallpaper). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:pathData="M34.95,69 A22,22 0 1,1 73.05,69"
-        android:strokeWidth="5"
-        android:strokeAlpha="0.35"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M34.95,69 A22,22 0 1,1 74.92,51.2"
-        android:strokeWidth="5"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M54,58 L62,44.14"
-        android:strokeWidth="3.5"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeLineCap="round" />
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M29,40h14v5h-9v6h7v5h-7v10h-5z" />
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M54,58m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+        android:fillType="evenOdd"
+        android:pathData="M47,40h14v16h-9v10h-5z M52,45v6h4v-6z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M65,40h5l2,6 2,-6h5v26h-5v-16l-2,6 -2,-6v16h-5z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M33,71h29v3h-29z" />
+    <path
+        android:fillAlpha="0.35"
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M63,71h12v3h-12z" />
 </vector>

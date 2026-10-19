@@ -1,39 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  App icon: a 240° gauge (centre 54,58, radius 22) filled to 80% in neon cyan,
-  with a white needle. Kept inside the 66dp adaptive-icon safe zone.
+  App icon: "FPM" (FPS Monitor) in neon cyan with a small meter bar below.
+  Original artwork: every letter is drawn here from plain straight-line
+  shapes (no font), under the project's MIT licence. All content stays
+  inside the 66dp adaptive-icon safe circle (radius 33 around 54,54).
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Track -->
+    <!-- Soft glow behind the letters -->
     <path
-        android:pathData="M34.95,69 A22,22 0 1,1 73.05,69"
-        android:strokeWidth="5"
-        android:strokeColor="#232D3A"
-        android:strokeLineCap="round" />
-    <!-- Glow under the value arc -->
-    <path
-        android:pathData="M34.95,69 A22,22 0 1,1 74.92,51.2"
-        android:strokeWidth="10"
-        android:strokeAlpha="0.25"
+        android:pathData="M29,40h14v5h-9v6h7v5h-7v10h-5z M47,40h14v16h-9v10h-5z M65,40h5l2,6 2,-6h5v26h-5v-16l-2,6 -2,-6v16h-5z"
+        android:strokeWidth="3"
+        android:strokeAlpha="0.3"
         android:strokeColor="#00E5FF"
-        android:strokeLineCap="round" />
-    <!-- Value arc -->
+        android:strokeLineJoin="round" />
+    <!-- F -->
     <path
-        android:pathData="M34.95,69 A22,22 0 1,1 74.92,51.2"
-        android:strokeWidth="5"
-        android:strokeColor="#00E5FF"
-        android:strokeLineCap="round" />
-    <!-- Needle -->
+        android:fillColor="#00E5FF"
+        android:pathData="M29,40h14v5h-9v6h7v5h-7v10h-5z" />
+    <!-- P (the inner square is cut out) -->
     <path
-        android:pathData="M54,58 L62,44.14"
-        android:strokeWidth="3.5"
-        android:strokeColor="#E6EDF3"
-        android:strokeLineCap="round" />
+        android:fillColor="#00E5FF"
+        android:fillType="evenOdd"
+        android:pathData="M47,40h14v16h-9v10h-5z M52,45v6h4v-6z" />
+    <!-- M -->
     <path
-        android:fillColor="#E6EDF3"
-        android:pathData="M54,58m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+        android:fillColor="#00E5FF"
+        android:pathData="M65,40h5l2,6 2,-6h5v26h-5v-16l-2,6 -2,-6v16h-5z" />
+    <!-- Meter bar: filled part, then the empty rest -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M33,71h29v3h-29z" />
+    <path
+        android:fillColor="#3A4757"
+        android:pathData="M63,71h12v3h-12z" />
 </vector>
