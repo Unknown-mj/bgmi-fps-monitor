@@ -1,6 +1,6 @@
 ---
 layout: default
-title: FPS Monitor for BGMI and PUBG Mobile – real FPS counter for Android
+title: Real FPS counter and stutter monitor for Android
 ---
 
 **FPS Monitor** is a free, open-source Android app that shows the **real frame rate (FPS), stutters and phone heat of BGMI and PUBG Mobile** while you play, in a small floating overlay.
