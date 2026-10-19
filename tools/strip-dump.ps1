@@ -3,6 +3,12 @@
 # screen names (banking, messages...) are removed.
 #   powershell -ExecutionPolicy Bypass -File tools\strip-dump.ps1 <file-or-folder>...
 param([Parameter(ValueFromRemainingArguments)][string[]]$Paths)
+$ErrorActionPreference = "Stop"
+
+# The package list comes from fps-dump (fps-core/src/games.rs), never a copy here.
+$tool = Join-Path (Split-Path $PSScriptRoot -Parent) "fps-core\target\debug\fps-dump.exe"
+if (-not (Test-Path $tool)) { throw "Build fps-dump first: cd fps-core; cargo build" }
+$gamePattern = 'SurfaceView\[(' + (& $tool --package-regex) + ')/'
 
 $files = $Paths | ForEach-Object { Get-ChildItem $_ -Recurse -File -Filter *.txt }
 foreach ($f in $files) {
@@ -21,7 +27,7 @@ foreach ($f in $files) {
     $keep.AddRange([string[]]$lines[0..($starts[0].Start - 1)])
     for ($b = 0; $b -lt $starts.Count; $b++) {
         $end = if ($b + 1 -lt $starts.Count) { $starts[$b + 1].Start - 1 } else { $lines.Count - 1 }
-        if ($starts[$b].Name -match 'SurfaceView\[(com\.pubg\.imobile|com\.tencent\.ig|com\.pubg\.krmobile|com\.vng\.pubgmobile|com\.rekoo\.pubgm|com\.tencent\.tmgp\.pubgmhd|com\.tencent\.iglite|com\.tencent\.igce)/') {
+        if ($starts[$b].Name -match $gamePattern) {
             $keep.AddRange([string[]]$lines[$starts[$b].Start..$end])
         }
     }

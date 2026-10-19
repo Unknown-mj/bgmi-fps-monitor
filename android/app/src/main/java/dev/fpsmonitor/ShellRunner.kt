@@ -12,24 +12,15 @@ object ShellRunner {
     private val ENABLE = arrayOf("dumpsys", "SurfaceFlinger", "--timestats", "-enable")
     private val CLEAR = arrayOf("dumpsys", "SurfaceFlinger", "--timestats", "-clear")
 
-    // "com\.pubg\.imobile|com\.tencent\.ig|…" from Rust's fixed list of PUBG
-    // versions. Only plain package characters are allowed in, so nothing but
-    // these package names can ever reach the command.
-    private val GAME_PATTERN = FpsNative.games.map { it.first }
-        .filter { it.matches(Regex("[a-z0-9_.]+")) }
-        .joinToString("|") { it.replace(".", "\\.") }
-
-    // Keeps only the PUBG games' block lines: the rate/uid lines just before
-    // each layerName, then totalFrames, droppedFrames and the present2present
-    // histogram. Everything about other apps stays on the phone's shell. The
-    // trailing "/" in the match keeps com.tencent.ig apart from com.tencent.iglite.
-    private val GAME_FILTER = """
-/^displayRefreshRate = / { pre = $0 "\n"; next }
-/^(renderRate|uid) = / { pre = pre $0 "\n"; next }
-/^layerName = / { inb = ($0 ~ /SurfaceView\[(GAMES)\//); if (inb) printf "%s%s\n", pre, $0; pre = ""; next }
-inb && /^(totalFrames|droppedFrames) = / { print; next }
-inb && /^present2present histogram/ { print; getline; print; next }
-""".replace("GAMES", GAME_PATTERN)
+    // Keeps only the PUBG games' block lines; everything about other apps stays
+    // on the phone's shell. Built by Rust from its fixed list of versions (see
+    // fps_core::games::awk_filter), the same filter the PC tools use. It must
+    // name the games and contain no single quote (it is wrapped in '…' below);
+    // otherwise monitoring stops with a clear error instead of silently
+    // matching nothing.
+    private val GAME_FILTER: String = FpsNative.gameFilter()
+        ?.takeIf { "SurfaceView\\[(com" in it && '\'' !in it }
+        ?: throw IllegalStateException(Reading.OUTDATED_LIBRARY)
 
     // -maxlayers keeps the layers with the most frames (verified on device),
     // so after a clear the game is always among them while it is being played.

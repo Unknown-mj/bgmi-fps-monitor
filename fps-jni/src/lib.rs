@@ -70,7 +70,14 @@ pub extern "system" fn Java_dev_fpsmonitor_FpsNative_feed<'l>(
     let now = now_nanos as f64 / 1e9;
     let reading = state.monitor.feed(&text, now);
     let log_ok = match &mut state.log {
-        Some(log) => log.record(now, &reading, &state.monitor).is_ok(),
+        Some(log) => {
+            // A different game took over: close its summary, continue in a new file pair.
+            let rotated = match state.monitor.take_finished() {
+                Some(done) => log.start_part(&done).is_ok(),
+                None => true,
+            };
+            rotated && log.record(now, &reading, &state.monitor).is_ok()
+        }
         None => false,
     };
 
@@ -107,10 +114,7 @@ pub extern "system" fn Java_dev_fpsmonitor_FpsNative_feed<'l>(
     out[20] = m.thermal_peaks.status.map_or(NONE, f64::from);
     out[21] = m.thermal_peaks.battery_c.unwrap_or(NONE);
     out[22] = t.gpu_c.unwrap_or(NONE);
-    out[23] = m
-        .game()
-        .and_then(|p| GAMES.iter().position(|g| g.package == p))
-        .map_or(NONE, |i| i as f64);
+    out[23] = m.known_game_index().map_or(NONE, |i| i as f64);
 
     let Ok(array) = env.new_double_array(out.len() as i32) else { return std::ptr::null_mut() };
     if env.set_double_array_region(&array, 0, &out).is_err() {
@@ -145,6 +149,13 @@ pub extern "system" fn Java_dev_fpsmonitor_FpsNative_feedThermal<'l>(
 pub extern "system" fn Java_dev_fpsmonitor_FpsNative_knownGames<'l>(env: JNIEnv<'l>, _class: JClass<'l>) -> jstring {
     let text: String = GAMES.iter().map(|g| format!("{}\t{}\n", g.package, g.name)).collect();
     env.new_string(text).map_or(std::ptr::null_mut(), |s| s.into_raw())
+}
+
+/// The awk program the app runs on the phone to keep only the PUBG games'
+/// lines (see `fps_core::games::awk_filter`). Never empty.
+#[no_mangle]
+pub extern "system" fn Java_dev_fpsmonitor_FpsNative_gameFilter<'l>(env: JNIEnv<'l>, _class: JClass<'l>) -> jstring {
+    env.new_string(fps_core::games::awk_filter()).map_or(std::ptr::null_mut(), |s| s.into_raw())
 }
 
 /// Smoothed FPS for the last minute (oldest first), for the live graph.

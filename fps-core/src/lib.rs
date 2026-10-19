@@ -321,14 +321,41 @@ pub enum Reading {
     Window(Window),
 }
 
+/// While the current game is still drawing, another one must draw more for
+/// this many readings in a row (2 s at 0.5 s) before it takes over, so two
+/// games drawing at once (split screen) don't flip back and forth.
+pub const SWITCH_READINGS: u32 = 4;
+
+/// Everything a session summary records, captured at one moment.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionSummary {
+    /// Name of the PUBG version measured (its package if unknown); empty if none yet.
+    pub game: String,
+    pub session: Session,
+    pub target_fps: Option<f64>,
+    pub worst_fps: Option<f64>,
+    pub thermal_peaks: ThermalPeaks,
+}
+
 /// Keeps the previous snapshot so each new dump gives one [`Window`].
 pub struct Monitor {
     /// Packages watched (one per game version); the one drawing is measured.
     packages: Vec<String>,
-    /// Index into `packages` of the game being measured.
+    /// Position of each watched package in [`games::GAMES`], if listed there.
+    known_index: Vec<Option<usize>>,
+    /// Index into `packages` of the game being measured right now.
     game: Option<usize>,
-    /// Each watched game's frame counter at the last reading, to see which one is drawing.
+    /// The game this session's numbers belong to. Unlike `game`, it stays set
+    /// when the game closes, so the summary keeps its name.
+    session_game: Option<usize>,
+    /// Each watched game's frame counter at its last appearance, kept while
+    /// its layer is briefly missing, to see which game is drawing.
     last_totals: Vec<Option<u64>>,
+    /// Another game currently drawing more than `game`, and for how many readings.
+    challenger: Option<(usize, u32)>,
+    /// Summary of a session closed because a different game took over; the
+    /// log writes it out and starts a new file.
+    finished: Option<SessionSummary>,
     prev: Option<(GameSnapshot, f64)>,
     /// Latest windows covering about SMOOTH_SECS, for the smoothed FPS.
     recent: VecDeque<Window>,
@@ -360,8 +387,12 @@ impl Monitor {
     pub fn watching(packages: &[&str]) -> Self {
         Monitor {
             packages: packages.iter().map(|p| p.to_string()).collect(),
+            known_index: packages.iter().map(|p| games::GAMES.iter().position(|g| g.package == *p)).collect(),
             game: None,
+            session_game: None,
             last_totals: vec![None; packages.len()],
+            challenger: None,
+            finished: None,
             prev: None,
             recent: VecDeque::new(),
             history: VecDeque::new(),
@@ -400,10 +431,17 @@ impl Monitor {
             return Reading::NoGame;
         };
         if self.game != Some(active) {
-            // Another version started drawing: start afresh so its frames
-            // and gaps never mix with the previous game's.
             self.game = Some(active);
             self.restart_baseline();
+        }
+        if self.session_game != Some(active) {
+            // A different version than this session was measuring: close that
+            // session so the two games' numbers never mix.
+            if self.session_game.is_some() && self.session.seconds > 0.0 {
+                self.finished = Some(self.summary());
+                self.start_new_session();
+            }
+            self.session_game = Some(active);
         }
         let Some(snap) = snaps.swap_remove(active) else { return Reading::NoGame };
         let reading = match &self.prev {
@@ -429,33 +467,104 @@ impl Monitor {
         reading
     }
 
-    /// Package of the game being measured, if any.
+    /// Package of the game being measured right now, if any.
     pub fn game(&self) -> Option<&str> {
         self.game.map(|i| self.packages[i].as_str())
     }
 
-    /// The watched game that drew the most frames since the last reading.
-    /// A game seen for the first time counts as 0 (its counter may hold old
-    /// frames), and a tie keeps the current game, so an idle layer left over
-    /// from another version never takes over.
-    fn pick_game(&mut self, snaps: &[Option<GameSnapshot>]) -> Option<usize> {
-        let mut best: Option<(usize, u64)> = None;
-        for (i, snap) in snaps.iter().enumerate() {
-            let Some(s) = snap else {
-                self.last_totals[i] = None;
-                continue;
-            };
-            let drawn = self.last_totals[i].map_or(0, |before| s.total_frames.saturating_sub(before));
-            self.last_totals[i] = Some(s.total_frames);
-            let better = match best {
-                None => true,
-                Some((_, most)) => drawn > most || (drawn == most && Some(i) == self.game),
-            };
-            if better {
-                best = Some((i, drawn));
-            }
+    /// Position in [`games::GAMES`] of the game being measured right now.
+    pub fn known_game_index(&self) -> Option<usize> {
+        self.game.and_then(|i| self.known_index[i])
+    }
+
+    /// The current session's numbers, labelled with the game they belong to.
+    pub fn summary(&self) -> SessionSummary {
+        let game = self.session_game.map_or_else(String::new, |i| {
+            let package = &self.packages[i];
+            games::name_of(package).map_or_else(|| package.clone(), str::to_string)
+        });
+        SessionSummary {
+            game,
+            session: self.session.clone(),
+            target_fps: self.target_fps,
+            worst_fps: self.worst_fps,
+            thermal_peaks: self.thermal_peaks,
         }
-        best.map(|(i, _)| i)
+    }
+
+    /// Summary of a session that a game switch just closed, once.
+    pub fn take_finished(&mut self) -> Option<SessionSummary> {
+        self.finished.take()
+    }
+
+    /// Which watched game to measure. Frames drawn since a game's last
+    /// appearance decide: a game seen for the first time counts 0 (its
+    /// counter may hold old frames), and a counter that went down (layer
+    /// recreated) counts from 0. The current game keeps its place on ties, if
+    /// it is briefly missing while no other game draws, and until a game that
+    /// draws while it also draws has led for [`SWITCH_READINGS`] readings.
+    fn pick_game(&mut self, snaps: &[Option<GameSnapshot>]) -> Option<usize> {
+        let drawn: Vec<Option<u64>> = snaps
+            .iter()
+            .zip(self.last_totals.iter_mut())
+            .map(|(snap, last)| {
+                let total = snap.as_ref()?.total_frames;
+                let d = last.map_or(0, |before| if total >= before { total - before } else { total });
+                *last = Some(total);
+                Some(d)
+            })
+            .collect();
+        // Most frames drawn; ties go to the earlier entry in the list.
+        let (lead, lead_drawn) = drawn
+            .iter()
+            .enumerate()
+            .filter_map(|(i, d)| d.map(|d| (i, d)))
+            .max_by_key(|&(i, d)| (d, std::cmp::Reverse(i)))?;
+
+        let Some(current) = self.game else {
+            self.challenger = None;
+            return Some(lead);
+        };
+        let current_drawn = match drawn[current] {
+            Some(d) => d,
+            // Current game missing from this dump: only another game that is
+            // actually drawing may replace it.
+            None => {
+                self.challenger = None;
+                return (lead_drawn > 0).then_some(lead);
+            }
+        };
+        if lead == current || lead_drawn <= current_drawn {
+            self.challenger = None;
+            return Some(current);
+        }
+        if current_drawn == 0 {
+            // The current game stopped drawing and another one is: switch now.
+            self.challenger = None;
+            return Some(lead);
+        }
+        let count = match self.challenger {
+            Some((game, n)) if game == lead => n + 1,
+            _ => 1,
+        };
+        if count >= SWITCH_READINGS {
+            self.challenger = None;
+            Some(lead)
+        } else {
+            self.challenger = Some((lead, count));
+            Some(current)
+        }
+    }
+
+    /// Fresh session stats for a new game; heat peaks restart from the latest reading.
+    fn start_new_session(&mut self) {
+        self.session = Session::default();
+        self.worst_fps = None;
+        self.trail.clear();
+        self.thermal_peaks = ThermalPeaks::default();
+        if let Some(t) = self.thermal {
+            self.thermal_peaks.add(&t);
+        }
     }
 
     fn restart_baseline(&mut self) {
@@ -845,6 +954,83 @@ present2present histogram is as below:
             m.feed(&dump(i * 60), i as f64 * 0.5);
             assert_eq!(m.game(), Some("com.pubg.imobile"));
         }
+    }
+
+    #[test]
+    fn summary_keeps_the_game_after_it_closes() {
+        let mut m = Monitor::for_known_games();
+        m.feed(&game_block("com.pubg.imobile", 0), 0.0);
+        m.feed(&game_block("com.pubg.imobile", 60), 0.5);
+        assert_eq!(m.feed("SurfaceFlinger TimeStats:\n", 1.0), Reading::NoGame);
+        assert_eq!(m.game(), None);
+        let s = m.summary();
+        assert_eq!(s.game, "BGMI");
+        assert_eq!(s.session.frames, 60);
+    }
+
+    #[test]
+    fn switching_games_closes_the_session_instead_of_mixing() {
+        let mut m = Monitor::for_known_games();
+        m.feed(&game_block("com.pubg.imobile", 0), 0.0);
+        m.feed(&game_block("com.pubg.imobile", 60), 0.5);
+        assert_eq!(m.take_finished(), None);
+        // KR appears idle (first sight counts 0): no game this reading...
+        assert_eq!(m.feed(&game_block("com.pubg.krmobile", 0), 1.0), Reading::NoGame);
+        assert_eq!(m.take_finished(), None);
+        // ...then draws: it takes over and BGMI's session is closed.
+        assert_eq!(m.feed(&game_block("com.pubg.krmobile", 45), 1.5), Reading::First);
+        let done = m.take_finished().expect("BGMI session closed");
+        assert_eq!(done.game, "BGMI");
+        assert_eq!(done.session.frames, 60);
+        assert_eq!(m.session, Session::default());
+        assert_eq!(m.summary().game, "PUBG Mobile (KR)");
+        assert_eq!(m.take_finished(), None);
+    }
+
+    #[test]
+    fn one_missing_dump_does_not_jump_to_an_idle_game() {
+        let mut m = Monitor::for_known_games();
+        let idle = game_block("com.tencent.ig", 999_999);
+        m.feed(&(idle.clone() + &game_block("com.pubg.imobile", 0)), 0.0);
+        m.feed(&(idle.clone() + &game_block("com.pubg.imobile", 60)), 0.5);
+        // BGMI's layer missing from one dump: no game this reading, never the idle one.
+        assert_eq!(m.feed(&idle, 1.0), Reading::NoGame);
+        // Back with new frames: BGMI is picked straight away.
+        m.feed(&(idle.clone() + &game_block("com.pubg.imobile", 120)), 1.5);
+        assert_eq!(m.game(), Some("com.pubg.imobile"));
+        assert_eq!(m.take_finished(), None);
+    }
+
+    #[test]
+    fn two_games_drawing_at_once_do_not_flip_back_and_forth() {
+        let mut m = Monitor::for_known_games();
+        let both = |a: u64, b: u64| game_block("com.pubg.imobile", a) + &game_block("com.tencent.ig", b);
+        m.feed(&both(0, 0), 0.0);
+        let (mut a, mut b) = (0, 0);
+        let mut windows = 0;
+        for i in 1..=12u64 {
+            // The leader alternates every reading.
+            if i % 2 == 0 { a += 60; b += 50 } else { a += 50; b += 60 }
+            if let Reading::Window(_) = m.feed(&both(a, b), i as f64 * 0.5) {
+                windows += 1;
+            }
+            assert_eq!(m.game(), Some("com.pubg.imobile"));
+        }
+        assert_eq!(windows, 12);
+    }
+
+    #[test]
+    fn a_game_that_keeps_leading_takes_over_after_two_seconds() {
+        let mut m = Monitor::for_known_games();
+        let both = |a: u64, b: u64| game_block("com.pubg.imobile", a) + &game_block("com.tencent.ig", b);
+        m.feed(&both(0, 0), 0.0);
+        let (mut a, mut b) = (0, 0);
+        for i in 1..=SWITCH_READINGS as u64 {
+            a += 10;
+            b += 60;
+            m.feed(&both(a, b), i as f64 * 0.5);
+        }
+        assert_eq!(m.game(), Some("com.tencent.ig"));
     }
 
     #[test]

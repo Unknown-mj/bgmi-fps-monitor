@@ -1,8 +1,10 @@
 //! Per-session files: `<name>.csv` with one line per reading, and
 //! `<name>.summary` (key=value lines) that is rewritten every few seconds,
-//! so a summary survives even if the app is killed mid-match.
+//! so a summary survives even if the app is killed mid-match. If a different
+//! game takes over mid-session, its numbers go to `<name>-2.csv` and
+//! `<name>-2.summary` (then `-3`, …), so two games never share a summary.
 
-use crate::{games, Monitor, Reading};
+use crate::{Monitor, Reading, SessionSummary};
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -15,20 +17,44 @@ const SUMMARY_EVERY: u32 = 10;
 pub struct SessionLog {
     csv: BufWriter<File>,
     summary_path: PathBuf,
+    /// The first part's csv path; later parts add "-2", "-3", … to its name.
+    first_csv: PathBuf,
+    part: u32,
     start: Option<f64>,
     lines: u32,
 }
 
+fn new_csv(path: &Path) -> io::Result<BufWriter<File>> {
+    let mut csv = BufWriter::new(File::create(path)?);
+    writeln!(csv, "{HEADER}")?;
+    Ok(csv)
+}
+
 impl SessionLog {
     pub fn create(csv_path: &Path) -> io::Result<Self> {
-        let mut csv = BufWriter::new(File::create(csv_path)?);
-        writeln!(csv, "{HEADER}")?;
         Ok(SessionLog {
-            csv,
+            csv: new_csv(csv_path)?,
             summary_path: csv_path.with_extension("summary"),
+            first_csv: csv_path.to_path_buf(),
+            part: 1,
             start: None,
             lines: 0,
         })
+    }
+
+    /// A different game took over: write the closed session's final summary,
+    /// then continue in a new file pair for the new game.
+    pub fn start_part(&mut self, finished: &SessionSummary) -> io::Result<()> {
+        fs::write(&self.summary_path, summary_text(finished))?;
+        self.csv.flush()?;
+        self.part += 1;
+        let stem = self.first_csv.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let path = self.first_csv.with_file_name(format!("{stem}-{}.csv", self.part));
+        self.csv = new_csv(&path)?;
+        self.summary_path = path.with_extension("summary");
+        self.start = None;
+        self.lines = 0;
+        Ok(())
     }
 
     pub fn record(&mut self, now_secs: f64, reading: &Reading, monitor: &Monitor) -> io::Result<()> {
@@ -44,7 +70,7 @@ impl SessionLog {
     }
 
     pub fn write_summary(&self, monitor: &Monitor) -> io::Result<()> {
-        fs::write(&self.summary_path, summary_text(monitor))
+        fs::write(&self.summary_path, summary_text(&monitor.summary()))
     }
 }
 
@@ -81,19 +107,19 @@ pub fn csv_line(elapsed: f64, reading: &Reading, monitor: &Monitor) -> String {
     )
 }
 
-pub fn summary_text(monitor: &Monitor) -> String {
-    let s = &monitor.session;
-    let p = &monitor.thermal_peaks;
+pub fn summary_text(summary: &SessionSummary) -> String {
+    let s = &summary.session;
+    let p = &summary.thermal_peaks;
     let per_min = if s.seconds > 0.0 { s.stutters as f64 * 60.0 / s.seconds } else { 0.0 };
     format!(
         "game={}\ngameplay_seconds={:.1}\navg_fps={:.1}\ntarget_fps={}\nworst_1s_fps={}\nframes={}\nskipped={}\n\
          stutters={}\nstutters_per_min={:.1}\nlong_pauses={}\n\
          start_battery_c={}\nmax_battery_c={}\nmax_heat_status={}\nmax_cpu_c={}\nmax_gpu_c={}\nmax_skin_c={}\n",
-        monitor.game().map_or("", |p| games::name_of(p).unwrap_or(p)),
+        summary.game,
         s.seconds,
         s.fps(),
-        opt(monitor.target_fps, 0),
-        opt(monitor.worst_fps, 1),
+        opt(summary.target_fps, 0),
+        opt(summary.worst_fps, 1),
         s.frames,
         s.skipped,
         s.stutters,
@@ -150,7 +176,7 @@ mod tests {
         assert_eq!(lines[1], "0.000,first,,,,,,,,,,,,");
         // Before a full second is known, the window's own rate gives the target.
         assert_eq!(lines[3], "1.000,ok,120.0,120.0,120,60,0,1,0,1,36.7,51.3,44.6,38.9");
-        assert!(summary_text(&m).contains("target_fps=120\n"));
+        assert!(summary_text(&m.summary()).contains("target_fps=120\n"));
 
         let summary = fs::read_to_string(dir.join("session.summary")).unwrap();
         assert!(summary.contains("avg_fps=120.0\n"));
@@ -162,6 +188,40 @@ mod tests {
         assert!(summary.contains("max_battery_c=36.7\n"));
         assert!(summary.contains("max_heat_status=1\n"));
         assert!(summary.contains("max_gpu_c=44.6\n"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn game_switch_closes_the_summary_and_continues_in_a_new_part() {
+        let dir = std::env::temp_dir().join(format!("fps-core-part-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let block = |pkg: &str, total: u64| {
+            format!(
+                "layerName = a SurfaceView[{pkg}/x](BLAST)\ntotalFrames = {total}\n\
+                 present2present histogram is as below:\n8ms={total}\n"
+            )
+        };
+        let mut m = Monitor::for_known_games();
+        let mut log = SessionLog::create(&dir.join("s.csv")).unwrap();
+        let feed = |m: &mut Monitor, log: &mut SessionLog, dump: String, t: f64| {
+            let r = m.feed(&dump, t);
+            if let Some(done) = m.take_finished() {
+                log.start_part(&done).unwrap();
+            }
+            log.record(t, &r, m).unwrap();
+        };
+        feed(&mut m, &mut log, block("com.pubg.imobile", 0), 0.0);
+        feed(&mut m, &mut log, block("com.pubg.imobile", 60), 0.5);
+        feed(&mut m, &mut log, block("com.tencent.iglite", 0), 1.0); // BGMI gone, Lite appears idle
+        feed(&mut m, &mut log, block("com.tencent.iglite", 30), 1.5); // Lite draws: takes over, new part
+        feed(&mut m, &mut log, block("com.tencent.iglite", 60), 2.0);
+        log.write_summary(&m).unwrap();
+
+        let first = fs::read_to_string(dir.join("s.summary")).unwrap();
+        let second = fs::read_to_string(dir.join("s-2.summary")).unwrap();
+        assert!(first.starts_with("game=BGMI\n") && first.contains("frames=60\n"), "{first}");
+        assert!(second.starts_with("game=PUBG Mobile Lite\n") && second.contains("frames=30\n"), "{second}");
+        assert!(dir.join("s-2.csv").exists());
         fs::remove_dir_all(&dir).unwrap();
     }
 }

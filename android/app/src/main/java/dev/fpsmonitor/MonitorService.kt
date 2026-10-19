@@ -92,13 +92,20 @@ class MonitorService : Service() {
         try {
             ShellRunner.enableStats()
             ShellRunner.clearStats()
+            // "" = every known PUBG version; Rust measures whichever is drawing.
+            monitor = FpsNative.create("", Sessions.newLogFile(this).path)
+        } catch (e: LinkageError) {
+            // Rust library missing, or older than this app (a native function
+            // or the game filter is missing): say so instead of failing every poll.
+            Log.e(TAG, "Native library problem", e)
+            publish(Reading.error(Reading.OUTDATED_LIBRARY))
+            stopSelf()
+            return
         } catch (e: Exception) {
             publish(Reading.error("Could not reach Shizuku: ${e.cause ?: e}"))
             stopSelf()
             return
         }
-        // "" = every known PUBG version; Rust measures whichever is drawing.
-        monitor = FpsNative.create("", Sessions.newLogFile(this).path)
         handler?.post(poll)
     }
 

@@ -132,7 +132,8 @@ The build scripts are **Windows (PowerShell)** only for now.
 | `tools/ab-auto.ps1` | Automatic on/off test during a match: turns monitoring on and off over adb and compares stutters, to check the app doesn't slow the game |
 | `tools/ab-test.ps1`, `tools/live-test.ps1` | Older manual versions of the same tests |
 | `tools/strip-dump.ps1` | Removes every app except the PUBG games from saved dumps |
-| `fps-core` → `cargo run -- before.txt after.txt <seconds>` | Compare two saved dumps on the PC |
+| `fps-core` → `cargo run -- before.txt after.txt <seconds>` | Compare two saved dumps on the PC (the PUBG version is detected) |
+| `fps-core` → `cargo run -- --awk` / `--package-regex` | Print the on-phone filter / package list the scripts use, generated from `fps-core/src/games.rs` |
 
 Starting and stopping from the PC is restricted to the adb shell (`android.permission.DUMP`), so other apps on the phone can't control the monitor.
 

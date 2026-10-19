@@ -9,6 +9,12 @@ object FpsNative {
     /** "package<TAB>name" lines from Rust's single list of PUBG versions. */
     @JvmStatic private external fun knownGames(): String?
 
+    /** The awk program that keeps only the PUBG games' lines on the phone (built by Rust). */
+    @JvmStatic external fun gameFilter(): String?
+
+    /** Values in each [feed] result; an older Rust library returns fewer. */
+    const val READING_SIZE = 24
+
     /** (package, display name) for every recognised PUBG version, in Rust's gameIndex order. */
     val games: List<Pair<String, String>> by lazy {
         knownGames().orEmpty().lines().mapNotNull { line ->
@@ -82,7 +88,12 @@ data class Reading(
     enum class Status { NO_GAME, FIRST, OK, RESET, ERROR }
 
     companion object {
-        fun from(v: DoubleArray) = Reading(
+        fun from(v: DoubleArray): Reading =
+            if (v.size < FpsNative.READING_SIZE) error(OUTDATED_LIBRARY) else decode(v)
+
+        const val OUTDATED_LIBRARY = "The Rust library is missing or out of date: rebuild with tools\\install-app.ps1"
+
+        private fun decode(v: DoubleArray) = Reading(
             status = Status.entries[v[0].toInt()],
             fps = v[1],
             frames = v[2].toLong(),

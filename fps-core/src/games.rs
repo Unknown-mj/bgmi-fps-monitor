@@ -27,6 +27,31 @@ pub fn name_of(package: &str) -> Option<&'static str> {
     GAMES.iter().find(|g| g.package == package).map(|g| g.name)
 }
 
+/// "com\.pubg\.imobile|com\.tencent\.ig|…": every package as one regex alternation.
+pub fn package_regex() -> String {
+    GAMES.iter().map(|g| g.package.replace('.', "\\.")).collect::<Vec<_>>().join("|")
+}
+
+/// The awk program run on the phone after `dumpsys SurfaceFlinger --timestats -dump`.
+/// It keeps only the PUBG games' layer blocks: the rate/uid lines just before
+/// each layerName, then totalFrames, droppedFrames and the present2present
+/// histogram. Everything about other apps stays on the phone. The trailing
+/// "/" in the match keeps com.tencent.ig apart from com.tencent.iglite.
+/// Used by the app (through JNI) and the PC tools (`fps-dump --awk`).
+pub fn awk_filter() -> String {
+    format!(
+        concat!(
+            "/^displayRefreshRate = / {{ pre = $0 \"\\n\"; next }}\n",
+            "/^(renderRate|uid) = / {{ pre = pre $0 \"\\n\"; next }}\n",
+            "/^layerName = / {{ inb = ($0 ~ /SurfaceView\\[({})\\//); ",
+            "if (inb) printf \"%s%s\\n\", pre, $0; pre = \"\"; next }}\n",
+            "inb && /^(totalFrames|droppedFrames) = / {{ print; next }}\n",
+            "inb && /^present2present histogram/ {{ print; getline; print; next }}\n",
+        ),
+        package_regex()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -38,6 +63,18 @@ mod tests {
             assert!(g.package.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_'));
             assert!(GAMES[i + 1..].iter().all(|o| o.package != g.package));
         }
+    }
+
+    #[test]
+    fn awk_filter_lists_every_package_and_is_shell_safe() {
+        let awk = awk_filter();
+        for g in GAMES {
+            assert!(awk.contains(&g.package.replace('.', "\\.")), "{}", g.package);
+        }
+        // The app wraps the program in single quotes for `sh -c`.
+        assert!(!awk.contains('\''));
+        assert!(awk.contains("/SurfaceView\\[(com\\.pubg\\.imobile|"));
+        assert!(awk.contains(")\\//)"));
     }
 
     #[test]
