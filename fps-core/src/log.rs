@@ -2,7 +2,7 @@
 //! `<name>.summary` (key=value lines) that is rewritten every few seconds,
 //! so a summary survives even if the app is killed mid-match.
 
-use crate::{Monitor, Reading};
+use crate::{games, Monitor, Reading};
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -86,9 +86,10 @@ pub fn summary_text(monitor: &Monitor) -> String {
     let p = &monitor.thermal_peaks;
     let per_min = if s.seconds > 0.0 { s.stutters as f64 * 60.0 / s.seconds } else { 0.0 };
     format!(
-        "gameplay_seconds={:.1}\navg_fps={:.1}\ntarget_fps={}\nworst_1s_fps={}\nframes={}\nskipped={}\n\
+        "game={}\ngameplay_seconds={:.1}\navg_fps={:.1}\ntarget_fps={}\nworst_1s_fps={}\nframes={}\nskipped={}\n\
          stutters={}\nstutters_per_min={:.1}\nlong_pauses={}\n\
          start_battery_c={}\nmax_battery_c={}\nmax_heat_status={}\nmax_cpu_c={}\nmax_gpu_c={}\nmax_skin_c={}\n",
+        monitor.game().map_or("", |p| games::name_of(p).unwrap_or(p)),
         s.seconds,
         s.fps(),
         opt(monitor.target_fps, 0),
@@ -153,6 +154,7 @@ mod tests {
 
         let summary = fs::read_to_string(dir.join("session.summary")).unwrap();
         assert!(summary.contains("avg_fps=120.0\n"));
+        assert!(summary.starts_with("game=BGMI\n"));
         assert!(summary.contains("worst_1s_fps=120.0\n"));
         assert!(summary.contains("stutters=1\n"));
         assert!(summary.contains("stutters_per_min=60.0\n"));

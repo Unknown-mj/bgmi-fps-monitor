@@ -6,7 +6,20 @@ object FpsNative {
         System.loadLibrary("fps_jni")
     }
 
-    /** [logPath] is the session's .csv file, or "" for no log. */
+    /** "package<TAB>name" lines from Rust's single list of PUBG versions. */
+    @JvmStatic private external fun knownGames(): String?
+
+    /** (package, display name) for every recognised PUBG version, in Rust's gameIndex order. */
+    val games: List<Pair<String, String>> by lazy {
+        knownGames().orEmpty().lines().mapNotNull { line ->
+            line.split('\t').takeIf { it.size == 2 }?.let { it[0] to it[1] }
+        }
+    }
+
+    /**
+     * [packageName] "" watches every PUBG version in [games] and measures
+     * whichever is drawing. [logPath] is the session's .csv file, or "" for no log.
+     */
     @JvmStatic external fun create(packageName: String, logPath: String): Long
 
     /** See fps-jni/src/lib.rs for the layout of the returned array. */
@@ -62,6 +75,8 @@ data class Reading(
     val maxBatteryC: Double? = null,
     /** Last minute of smoothed FPS for the live graph; only filled while the app screen is open. */
     val trail: DoubleArray? = null,
+    /** Display name of the PUBG version being measured, e.g. "BGMI"; null when none. */
+    val game: String? = null,
     val error: String? = null,
 ) {
     enum class Status { NO_GAME, FIRST, OK, RESET, ERROR }
@@ -91,6 +106,7 @@ data class Reading(
             maxHeatStatus = v[20].takeIf { it >= 0 }?.toInt(),
             maxBatteryC = v[21].takeIf { it >= 0 },
             gpuC = v[22].takeIf { it >= 0 },
+            game = v[23].takeIf { it >= 0 }?.let { FpsNative.games.getOrNull(it.toInt())?.second },
         )
 
         fun heatName(status: Int): String =

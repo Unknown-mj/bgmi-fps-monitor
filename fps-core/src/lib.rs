@@ -21,6 +21,7 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
+pub mod games;
 pub mod log;
 pub mod series;
 pub mod thermal;
@@ -322,7 +323,12 @@ pub enum Reading {
 
 /// Keeps the previous snapshot so each new dump gives one [`Window`].
 pub struct Monitor {
-    package: String,
+    /// Packages watched (one per game version); the one drawing is measured.
+    packages: Vec<String>,
+    /// Index into `packages` of the game being measured.
+    game: Option<usize>,
+    /// Each watched game's frame counter at the last reading, to see which one is drawing.
+    last_totals: Vec<Option<u64>>,
     prev: Option<(GameSnapshot, f64)>,
     /// Latest windows covering about SMOOTH_SECS, for the smoothed FPS.
     recent: VecDeque<Window>,
@@ -341,9 +347,21 @@ pub struct Monitor {
 }
 
 impl Monitor {
+    /// Watches a single game package.
     pub fn new(package: &str) -> Self {
+        Self::watching(&[package])
+    }
+
+    /// Watches every PUBG version in [`games::GAMES`].
+    pub fn for_known_games() -> Self {
+        Self::watching(&games::GAMES.iter().map(|g| g.package).collect::<Vec<_>>())
+    }
+
+    pub fn watching(packages: &[&str]) -> Self {
         Monitor {
-            package: package.to_string(),
+            packages: packages.iter().map(|p| p.to_string()).collect(),
+            game: None,
+            last_totals: vec![None; packages.len()],
             prev: None,
             recent: VecDeque::new(),
             history: VecDeque::new(),
@@ -373,13 +391,21 @@ impl Monitor {
 
     /// `now_secs` must come from a monotonic clock.
     pub fn feed(&mut self, dump: &str, now_secs: f64) -> Reading {
-        let Some(snap) = game_snapshot(&parse_dump(dump), &self.package) else {
-            self.prev = None;
-            self.recent.clear();
-            self.history.clear();
-            self.target_fps = None;
+        let blocks = parse_dump(dump);
+        let mut snaps: Vec<Option<GameSnapshot>> =
+            self.packages.iter().map(|p| game_snapshot(&blocks, p)).collect();
+        let Some(active) = self.pick_game(&snaps) else {
+            self.game = None;
+            self.restart_baseline();
             return Reading::NoGame;
         };
+        if self.game != Some(active) {
+            // Another version started drawing: start afresh so its frames
+            // and gaps never mix with the previous game's.
+            self.game = Some(active);
+            self.restart_baseline();
+        }
+        let Some(snap) = snaps.swap_remove(active) else { return Reading::NoGame };
         let reading = match &self.prev {
             Some((prev, then)) => {
                 // Judged against the target known so far, from earlier windows.
@@ -401,6 +427,42 @@ impl Monitor {
         };
         self.prev = Some((snap, now_secs));
         reading
+    }
+
+    /// Package of the game being measured, if any.
+    pub fn game(&self) -> Option<&str> {
+        self.game.map(|i| self.packages[i].as_str())
+    }
+
+    /// The watched game that drew the most frames since the last reading.
+    /// A game seen for the first time counts as 0 (its counter may hold old
+    /// frames), and a tie keeps the current game, so an idle layer left over
+    /// from another version never takes over.
+    fn pick_game(&mut self, snaps: &[Option<GameSnapshot>]) -> Option<usize> {
+        let mut best: Option<(usize, u64)> = None;
+        for (i, snap) in snaps.iter().enumerate() {
+            let Some(s) = snap else {
+                self.last_totals[i] = None;
+                continue;
+            };
+            let drawn = self.last_totals[i].map_or(0, |before| s.total_frames.saturating_sub(before));
+            self.last_totals[i] = Some(s.total_frames);
+            let better = match best {
+                None => true,
+                Some((_, most)) => drawn > most || (drawn == most && Some(i) == self.game),
+            };
+            if better {
+                best = Some((i, drawn));
+            }
+        }
+        best.map(|(i, _)| i)
+    }
+
+    fn restart_baseline(&mut self) {
+        self.prev = None;
+        self.recent.clear();
+        self.history.clear();
+        self.target_fps = None;
     }
 
     /// FPS over the last ~SMOOTH_SECS. Steadier than one 0.5 s window,
@@ -727,6 +789,62 @@ present2present histogram is as below:
         let w = run_cadence(&mut m, &mut state, 2.0, 30, 15);
         assert_eq!(m.target_fps, Some(120.0));
         assert_eq!(w.skipped, 15);
+    }
+
+    /// One 120 Hz block for any game package, 8 ms frames only.
+    fn game_block(package: &str, total: u64) -> String {
+        format!(
+            "displayRefreshRate = 120 fps\nrenderRate = 120 fps\nuid = 10123\n\
+             layerName = 1a2b3c SurfaceView[{package}/com.epicgames.ue4.GameActivity](BLAST) 01-01 12:00:00.000#9\n\
+             totalFrames = {total}\ndroppedFrames = 0\n\
+             present2present histogram is as below:\n8ms={total} 16ms=0\n"
+        )
+    }
+
+    #[test]
+    fn recognises_every_known_version() {
+        for g in games::GAMES {
+            let mut m = Monitor::for_known_games();
+            assert_eq!(m.feed(&game_block(g.package, 0), 0.0), Reading::First, "{}", g.name);
+            assert_eq!(m.game(), Some(g.package));
+            let Reading::Window(w) = m.feed(&game_block(g.package, 60), 0.5) else { panic!("{}", g.name) };
+            assert_eq!(w.frames, 60);
+        }
+    }
+
+    #[test]
+    fn global_and_lite_are_not_confused() {
+        let mut m = Monitor::for_known_games();
+        m.feed(&game_block("com.tencent.iglite", 0), 0.0);
+        assert_eq!(m.game(), Some("com.tencent.iglite"));
+        assert!(!is_game_layer("SurfaceView[com.tencent.iglite/x](BLAST)", "com.tencent.ig"));
+    }
+
+    #[test]
+    fn switching_versions_starts_a_fresh_baseline() {
+        let mut m = Monitor::for_known_games();
+        m.feed(&game_block("com.pubg.imobile", 0), 0.0);
+        m.feed(&game_block("com.pubg.imobile", 60), 0.5);
+        // BGMI closed (its layer idles) and the KR version starts drawing.
+        let both = |bgmi: u64, kr: u64| game_block("com.pubg.imobile", bgmi) + &game_block("com.pubg.krmobile", kr);
+        m.feed(&both(60, 0), 1.0); // KR seen for the first time: counts as 0, BGMI kept
+        assert_eq!(m.game(), Some("com.pubg.imobile"));
+        assert_eq!(m.feed(&both(60, 45), 1.5), Reading::First); // KR drew, BGMI didn't: switch
+        assert_eq!(m.game(), Some("com.pubg.krmobile"));
+        let Reading::Window(w) = m.feed(&both(60, 90), 2.0) else { panic!() };
+        assert_eq!(w.frames, 45); // only KR's frames, never mixed with BGMI's
+    }
+
+    #[test]
+    fn idle_leftover_layer_does_not_take_over() {
+        let mut m = Monitor::for_known_games();
+        // An old Global-version layer with a big frame counter sits idle while BGMI plays.
+        let dump = |bgmi: u64| game_block("com.tencent.ig", 999_999) + &game_block("com.pubg.imobile", bgmi);
+        m.feed(&dump(0), 0.0);
+        for i in 1..=4 {
+            m.feed(&dump(i * 60), i as f64 * 0.5);
+            assert_eq!(m.game(), Some("com.pubg.imobile"));
+        }
     }
 
     #[test]

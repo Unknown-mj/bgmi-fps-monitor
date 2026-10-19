@@ -12,22 +12,30 @@ object ShellRunner {
     private val ENABLE = arrayOf("dumpsys", "SurfaceFlinger", "--timestats", "-enable")
     private val CLEAR = arrayOf("dumpsys", "SurfaceFlinger", "--timestats", "-clear")
 
-    // Keeps only BGMI's block lines: the rate/uid lines just before each
-    // layerName, then totalFrames, droppedFrames and the present2present
-    // histogram. Everything about other apps stays on the phone's shell.
-    private const val BGMI_FILTER = """
+    // "com\.pubg\.imobile|com\.tencent\.ig|…" from Rust's fixed list of PUBG
+    // versions. Only plain package characters are allowed in, so nothing but
+    // these package names can ever reach the command.
+    private val GAME_PATTERN = FpsNative.games.map { it.first }
+        .filter { it.matches(Regex("[a-z0-9_.]+")) }
+        .joinToString("|") { it.replace(".", "\\.") }
+
+    // Keeps only the PUBG games' block lines: the rate/uid lines just before
+    // each layerName, then totalFrames, droppedFrames and the present2present
+    // histogram. Everything about other apps stays on the phone's shell. The
+    // trailing "/" in the match keeps com.tencent.ig apart from com.tencent.iglite.
+    private val GAME_FILTER = """
 /^displayRefreshRate = / { pre = $0 "\n"; next }
 /^(renderRate|uid) = / { pre = pre $0 "\n"; next }
-/^layerName = / { inb = index($0, "SurfaceView[com.pubg.imobile/") > 0; if (inb) printf "%s%s\n", pre, $0; pre = ""; next }
+/^layerName = / { inb = ($0 ~ /SurfaceView\[(GAMES)\//); if (inb) printf "%s%s\n", pre, $0; pre = ""; next }
 inb && /^(totalFrames|droppedFrames) = / { print; next }
 inb && /^present2present histogram/ { print; getline; print; next }
-"""
+""".replace("GAMES", GAME_PATTERN)
 
     // -maxlayers keeps the layers with the most frames (verified on device),
-    // so after a clear BGMI is always among them while it is being played.
+    // so after a clear the game is always among them while it is being played.
     private val READ = arrayOf(
         "sh", "-c",
-        "dumpsys SurfaceFlinger --timestats -dump -maxlayers 20 | awk '$BGMI_FILTER'",
+        "dumpsys SurfaceFlinger --timestats -dump -maxlayers 20 | awk '$GAME_FILTER'",
     )
 
     // Heat status, live sensor temperatures and battery temperature (~3 KB).
@@ -45,7 +53,7 @@ inb && /^present2present histogram/ { print; getline; print; next }
     /** Forget all past layers, so dumps stay small and new layers get tracked. */
     fun clearStats() { run(CLEAR) }
 
-    /** BGMI's lines from the timestats dump (usually 1–4 KB). */
+    /** The PUBG games' lines from the timestats dump (usually 1–4 KB). */
     fun readGameStats(): String = run(READ)
 
     // Shizuku 13 made newProcess private to push apps toward a UserService.

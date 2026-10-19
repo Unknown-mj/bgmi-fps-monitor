@@ -9,12 +9,12 @@ $root = Split-Path $PSScriptRoot -Parent
 $tool = Join-Path $root "fps-core\target\debug\fps-dump.exe"
 $out  = Join-Path $root ("samples\ab-auto-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 New-Item -ItemType Directory -Force $out | Out-Null
-$awkOnPhone = "/data/local/tmp/fps_bgmi.awk"
+$awkOnPhone = "/data/local/tmp/fps_pubg.awk"
 $service = "dev.fpsmonitor/.MonitorService"
 
 function Save-Reading($path) {
     # Same on-phone filter as the app: only BGMI's lines leave the phone.
-    & $adb push (Join-Path $PSScriptRoot "bgmi.awk") $awkOnPhone | Out-Null
+    & $adb push (Join-Path $PSScriptRoot "pubg.awk") $awkOnPhone | Out-Null
     & $adb exec-out "dumpsys SurfaceFlinger --timestats -dump -maxlayers 20 | awk -f $awkOnPhone" |
         Out-File -Encoding utf8 $path
     & $adb shell rm $awkOnPhone

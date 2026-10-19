@@ -16,12 +16,12 @@ import android.util.Log
 import rikka.shizuku.Shizuku
 
 /**
- * Polls BGMI's frame stats every [intervalMs] while monitoring is on, even
+ * Polls the PUBG game's frame stats every [intervalMs] while monitoring is on, even
  * with the game in front. Live FPS shows in the notification and in
  * [MainActivity]; every reading is also written to logcat (tag FpsMonitor).
  *
  * Can also be started/stopped from the PC over adb, so tests can run while
- * BGMI stays in front (only the adb shell can do this: see the manifest):
+ * the game stays in front (only the adb shell can do this: see the manifest):
  *   am start-foreground-service -n dev.fpsmonitor/.MonitorService --ei interval_ms 500
  *   am stopservice -n dev.fpsmonitor/.MonitorService
  */
@@ -97,7 +97,8 @@ class MonitorService : Service() {
             stopSelf()
             return
         }
-        monitor = FpsNative.create(BGMI, Sessions.newLogFile(this).path)
+        // "" = every known PUBG version; Rust measures whichever is drawing.
+        monitor = FpsNative.create("", Sessions.newLogFile(this).path)
         handler?.post(poll)
     }
 
@@ -164,7 +165,6 @@ class MonitorService : Service() {
     }
 
     companion object {
-        const val BGMI = "com.pubg.imobile"
         private const val TAG = "FpsMonitor"
         private const val CHANNEL = "live_fps"
         private const val NOTIFICATION_ID = 1
@@ -187,9 +187,10 @@ class MonitorService : Service() {
             private set
 
         fun headline(r: Reading): String = when (r.status) {
-            Reading.Status.NO_GAME -> "Waiting for BGMI…"
-            Reading.Status.FIRST, Reading.Status.RESET -> "Measuring…"
-            Reading.Status.OK -> "%.0f%s FPS · %d stutters%s".format(
+            Reading.Status.NO_GAME -> "Waiting for a PUBG game…"
+            Reading.Status.FIRST, Reading.Status.RESET -> r.game?.let { "$it · measuring…" } ?: "Measuring…"
+            Reading.Status.OK -> "%s%.0f%s FPS · %d stutters%s".format(
+                r.game?.let { "$it · " } ?: "",
                 r.smoothedFps ?: r.fps,
                 r.targetFps?.let { " / %.0f".format(it) } ?: "",
                 r.sessionStutters,

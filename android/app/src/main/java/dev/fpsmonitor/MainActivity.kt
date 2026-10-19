@@ -32,7 +32,7 @@ import kotlin.concurrent.thread
 /**
  * Three tabs: Live (gauge, graph, stats, heat, start/stop), Sessions (past
  * matches with graphs) and Settings (theme, overlay). The measuring itself
- * happens in [MonitorService], so it keeps going while BGMI is in front.
+ * happens in [MonitorService], so it keeps going while the game is in front.
  * Each reading only updates values; views are built once.
  */
 class MainActivity : Activity() {
@@ -300,7 +300,8 @@ class MainActivity : Activity() {
             render(r)
         } else if (!running) {
             gauge.set(null, r?.targetFps)
-            message.text = "Tap START, then open BGMI.\nLive FPS shows in the overlay and notification while you play."
+            message.text = "Tap START, then open your PUBG game (BGMI, Global, KR, VN, TW, Lite…).\n" +
+                "Live FPS shows in the overlay and notification while you play."
         }
     }
 
@@ -324,7 +325,7 @@ class MainActivity : Activity() {
         gpuBar.set(r.gpuC)
 
         message.text = when {
-            ok -> "This session: ${duration(r.sessionSeconds)} of gameplay"
+            ok -> (r.game?.let { "$it · " } ?: "") + "${duration(r.sessionSeconds)} of gameplay"
             else -> MonitorService.headline(r)
         }
         message.setTextColor(if (r.status == Reading.Status.ERROR) Theme.BAD else Theme.TEXT_DIM)
@@ -381,7 +382,8 @@ class MainActivity : Activity() {
         val fpsColor = Theme.fpsColor(s.avgFps, s.targetFps)
         val title = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            addView(label(dateFormat.format(s.started).uppercase(), 13f), LinearLayout.LayoutParams(0, WRAP, 1f))
+            val title = (s.game?.let { "$it · " } ?: "") + dateFormat.format(s.started)
+            addView(label(title.uppercase(), 13f), LinearLayout.LayoutParams(0, WRAP, 1f))
             addView(label(duration(s.gameplaySeconds) + " PLAYED", 13f))
         }
         val fps = LinearLayout(this).apply {
@@ -440,7 +442,7 @@ class MainActivity : Activity() {
         spaced(overlayCard()),
         spaced(card(
             label("ABOUT", 13f),
-            spaced(body("Reads BGMI's frame stats from Android's display system through Shizuku, " +
+            spaced(body("Reads the PUBG game's frame stats from Android's display system through Shizuku, " +
                 "twice a second. It never touches the game.", 13f), 6f),
         )),
     )
@@ -539,7 +541,7 @@ class MainActivity : Activity() {
             spaced(label("SIZE", 11f), 10f),
             spaced(sizes, 6f),
             spaced(switch(prefs, "Stack meters vertically", OverlaySettings.VERTICAL, false), 6f),
-            switch(prefs, "Only show over BGMI", OverlaySettings.ONLY_GAME, true),
+            switch(prefs, "Only show over the game", OverlaySettings.ONLY_GAME, true),
             switch(prefs, "Flash red on stutter", OverlaySettings.FLASH, false),
             switch(prefs, "Lock position (touches go to the game)", OverlaySettings.LOCKED, true),
             spaced(body("To move it: turn off Lock (it then shows on any screen), drag it, then lock it again.", 13f), 4f),

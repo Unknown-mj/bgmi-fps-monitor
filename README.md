@@ -1,9 +1,9 @@
-# FPS Monitor for BGMI
+# FPS Monitor for BGMI and PUBG Mobile
 
-A small Android app that shows **BGMI's real frame rate, stutters and phone heat while you play**, entirely on the phone. The measuring and analysis are written in **Rust**; the Android side is a thin Kotlin layer.
+A small Android app that shows **the real frame rate, stutters and phone heat of BGMI and other PUBG Mobile versions while you play**, entirely on the phone. It recognises the version you open automatically. The measuring and analysis are written in **Rust**; the Android side is a thin Kotlin layer.
 
 > [!WARNING]
-> - **Unofficial.** Not made, endorsed or supported by KRAFTON or BGMI.
+> - **Unofficial.** Not made, endorsed or supported by KRAFTON, Tencent, or any BGMI or PUBG Mobile publisher.
 > - **Read-only.** It never opens, injects into, reads the memory of, or modifies the game. It only reads frame statistics that Android's display system (SurfaceFlinger) already keeps. No official KRAFTON policy on such tools was found, so **use it at your own risk**.
 > - **Tested on one phone only** (Android 16, 120 Hz screen). It may not work, or may report wrong numbers, on other phones; see [Compatibility](#compatibility).
 > - **Needs [Shizuku](https://shizuku.rikka.app/)**, which gives apps shell-level (ADB) access. Only grant it to apps you trust. This app uses it for four fixed, read-only commands and nothing else (see `ShellRunner.kt`).
@@ -21,7 +21,7 @@ A small Android app that shows **BGMI's real frame rate, stutters and phone heat
   - a separate switch for each meter: FPS, stutter count, battery, surface, CPU and GPU temperature
   - FPS coloured by health; each temperature turns orange, then red, as that part heats up
   - sizes S, M or L, and a black or transparent background
-  - optionally shown only while BGMI is drawing, and an optional red flash on each stutter
+  - optionally shown only while the game is drawing, and an optional red flash on each stutter
   - touches pass through to the game when locked
   - kept light: fixed-width text, no re-layouts, redraws only when a value changes
 - **Live notification** with FPS, stutters and battery temperature.
@@ -55,11 +55,26 @@ A small Android app that shows **BGMI's real frame rate, stutters and phone heat
 ## How it works
 
 1. When monitoring starts, the app clears and enables SurfaceFlinger's frame statistics (`dumpsys SurfaceFlinger --timestats`).
-2. Every 0.5 s it reads the statistics through Shizuku. A filter on the phone keeps only BGMI's lines (about 1–4 KB).
+2. Every 0.5 s it reads the statistics through Shizuku. A filter on the phone keeps only the PUBG games' lines (about 1–4 KB).
 3. The Rust core (`fps-core`) parses them and computes FPS from the frame counter, and skipped frames and stutters from the frame-gap histogram.
 4. Results go to the screen, overlay and notification, and into a session log in the app's private storage.
 
-BGMI is found by its package name (`com.pubg.imobile`), never by its full layer name, which changes every session.
+Each game is found by its package name, never by its full layer name, which changes every session. If several versions are installed, the one currently drawing frames is measured; switching versions starts a fresh measurement so two games' numbers never mix.
+
+## Supported versions
+
+| Version | Android package | Status |
+|---|---|---|
+| BGMI (India) | `com.pubg.imobile` | **Tested on a real phone** |
+| PUBG Mobile (Global) | `com.tencent.ig` | Package confirmed, not tested on a phone |
+| PUBG Mobile (KR) | `com.pubg.krmobile` | Package confirmed, not tested on a phone |
+| PUBG Mobile (VN) | `com.vng.pubgmobile` | Package confirmed, not tested on a phone |
+| PUBG Mobile Lite | `com.tencent.iglite` | Package confirmed, not tested on a phone |
+| PUBG Mobile (TW) | `com.rekoo.pubgm` | Package from older sources, not tested |
+| Game for Peace (China) | `com.tencent.tmgp.pubgmhd` | Package from third-party listings, not tested |
+| PUBG Mobile (Beta) | `com.tencent.igce` | Package from one unofficial source, not tested |
+
+All versions use the same engine and the same Android display system, so they are read the same proven way as BGMI. A wrong package name is harmless: it simply never matches. The list lives in one place, `fps-core/src/games.rs`.
 
 ## Compatibility
 
@@ -68,7 +83,7 @@ BGMI is found by its package name (`com.pubg.imobile`), never by its full layer 
 | Android 14 or newer | Uses the "special use" foreground-service type |
 | 64-bit ARM phone (arm64-v8a) | The Rust library is built only for arm64 |
 | Shizuku installed and running | Frame statistics need shell-level access. Shizuku has to be restarted after every reboot (wireless debugging or a PC). |
-| BGMI (`com.pubg.imobile`) | The game is hard-coded |
+| A supported PUBG version | See [Supported versions](#supported-versions) |
 
 Phone makers can change how SurfaceFlinger reports statistics. The parser was verified on one Android 16 phone only.
 
@@ -105,7 +120,7 @@ The build scripts are **Windows (PowerShell)** only for now.
 1. Start **Shizuku**.
 2. Open **FPS Monitor** and tap **Start monitoring**. Allow the Shizuku and notification permissions when asked.
 3. *(Optional)* In **Settings**, allow "display over other apps" and turn on the floating overlay. To move it, turn off Lock, drag it, then lock it again.
-4. Play BGMI. Live FPS shows in the overlay and the notification.
+4. Play BGMI or any supported PUBG version. Live FPS shows in the overlay and the notification, with the version's name.
 5. Tap **Stop monitoring** afterwards. The **Sessions** tab has the summary and graph for each match.
 
 ## PC tools (optional)
@@ -116,7 +131,7 @@ The build scripts are **Windows (PowerShell)** only for now.
 | `tools/build-release.ps1` | Build the release APK and check it for personal strings |
 | `tools/ab-auto.ps1` | Automatic on/off test during a match: turns monitoring on and off over adb and compares stutters, to check the app doesn't slow the game |
 | `tools/ab-test.ps1`, `tools/live-test.ps1` | Older manual versions of the same tests |
-| `tools/strip-dump.ps1` | Removes every app except BGMI from saved dumps |
+| `tools/strip-dump.ps1` | Removes every app except the PUBG games from saved dumps |
 | `fps-core` → `cargo run -- before.txt after.txt <seconds>` | Compare two saved dumps on the PC |
 
 Starting and stopping from the PC is restricted to the adb shell (`android.permission.DUMP`), so other apps on the phone can't control the monitor.
@@ -148,7 +163,7 @@ tools/               PowerShell build and test scripts, awk filter
 ## Privacy
 
 - Everything stays on the phone. The app has **no internet permission** and sends nothing anywhere.
-- The on-phone filter passes only BGMI's frame statistics to the app. Other apps' data in the system report is discarded on the phone.
+- The on-phone filter passes only the PUBG games' frame statistics to the app. Other apps' data in the system report is discarded on the phone.
 - Session logs live in the app's private storage, are excluded from Android backup and phone-to-phone transfer, and are deleted when you uninstall it.
 - `samples/` (raw dumps, which list every app on a phone) and build outputs are excluded from this repository.
 

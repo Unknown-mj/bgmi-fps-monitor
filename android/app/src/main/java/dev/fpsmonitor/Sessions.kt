@@ -29,6 +29,8 @@ object Sessions {
     data class Summary(
         /** The session's per-reading log, for the match graph. */
         val csv: File,
+        /** PUBG version played, e.g. "BGMI"; null for sessions logged before multi-game support. */
+        val game: String?,
         val started: Date,
         val gameplaySeconds: Double,
         val avgFps: Double,
@@ -49,6 +51,7 @@ object Sessions {
                 }.toMap()
                 Summary(
                     csv = File(file.parentFile, file.nameWithoutExtension + ".csv"),
+                    game = v["game"]?.takeIf { it.isNotBlank() },
                     started = fileName.parse(file.nameWithoutExtension)!!,
                     gameplaySeconds = v.getValue("gameplay_seconds").toDouble(),
                     avgFps = v.getValue("avg_fps").toDouble(),

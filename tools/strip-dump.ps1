@@ -1,5 +1,6 @@
 # Rewrites timestats dumps in place, keeping only the global header and the
-# BGMI layer blocks. Other apps' screen names (banking, messages...) are removed.
+# PUBG game layer blocks (same list as fps-core/src/games.rs). Other apps'
+# screen names (banking, messages...) are removed.
 #   powershell -ExecutionPolicy Bypass -File tools\strip-dump.ps1 <file-or-folder>...
 param([Parameter(ValueFromRemainingArguments)][string[]]$Paths)
 
@@ -20,7 +21,7 @@ foreach ($f in $files) {
     $keep.AddRange([string[]]$lines[0..($starts[0].Start - 1)])
     for ($b = 0; $b -lt $starts.Count; $b++) {
         $end = if ($b + 1 -lt $starts.Count) { $starts[$b + 1].Start - 1 } else { $lines.Count - 1 }
-        if ($starts[$b].Name -match 'SurfaceView\[com\.pubg\.imobile/') {
+        if ($starts[$b].Name -match 'SurfaceView\[(com\.pubg\.imobile|com\.tencent\.ig|com\.pubg\.krmobile|com\.vng\.pubgmobile|com\.rekoo\.pubgm|com\.tencent\.tmgp\.pubgmhd|com\.tencent\.iglite|com\.tencent\.igce)/') {
             $keep.AddRange([string[]]$lines[$starts[$b].Start..$end])
         }
     }

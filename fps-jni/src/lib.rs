@@ -2,11 +2,12 @@
 //! text and a monotonic timestamp; Rust keeps the state, does the math and
 //! writes the session log.
 
+use fps_core::games::GAMES;
 use fps_core::log::SessionLog;
 use fps_core::series::session_series;
 use fps_core::{Monitor, Reading};
 use jni::objects::{JClass, JString};
-use jni::sys::{jdoubleArray, jint, jlong};
+use jni::sys::{jdoubleArray, jint, jlong, jstring};
 use jni::JNIEnv;
 use std::path::Path;
 
@@ -37,14 +38,17 @@ pub extern "system" fn Java_dev_fpsmonitor_FpsNative_create<'l>(
     let package: String = package.into();
     let log_path: String = env.get_string(&log_path).map(Into::into).unwrap_or_default();
     let log = if log_path.is_empty() { None } else { SessionLog::create(Path::new(&log_path)).ok() };
-    Box::into_raw(Box::new(State { monitor: Monitor::new(&package), log })) as jlong
+    // "" = watch every known PUBG version and measure whichever is drawing.
+    let monitor = if package.is_empty() { Monitor::for_known_games() } else { Monitor::new(&package) };
+    Box::into_raw(Box::new(State { monitor, log })) as jlong
 }
 
 /// Returns [status, fps, frames, skipped, stutters, longPauses,
 ///          sessionFps, sessionSeconds, sessionFrames, sessionSkipped,
 ///          sessionStutters, sessionLongPauses, smoothedFps, worstFps,
 ///          logOk, targetFps, heatStatus, batteryC, cpuC, skinC,
-///          maxHeatStatus, maxBatteryC, gpuC], or null on a JNI error.
+///          maxHeatStatus, maxBatteryC, gpuC, gameIndex], or null on a JNI
+/// error. gameIndex points into `knownGames()`.
 /// Missing values are -1.
 #[no_mangle]
 pub extern "system" fn Java_dev_fpsmonitor_FpsNative_feed<'l>(
@@ -70,7 +74,7 @@ pub extern "system" fn Java_dev_fpsmonitor_FpsNative_feed<'l>(
         None => false,
     };
 
-    let mut out = [0.0; 23];
+    let mut out = [0.0; 24];
     match &reading {
         Reading::NoGame => out[0] = NO_GAME,
         Reading::First => out[0] = FIRST,
@@ -103,6 +107,10 @@ pub extern "system" fn Java_dev_fpsmonitor_FpsNative_feed<'l>(
     out[20] = m.thermal_peaks.status.map_or(NONE, f64::from);
     out[21] = m.thermal_peaks.battery_c.unwrap_or(NONE);
     out[22] = t.gpu_c.unwrap_or(NONE);
+    out[23] = m
+        .game()
+        .and_then(|p| GAMES.iter().position(|g| g.package == p))
+        .map_or(NONE, |i| i as f64);
 
     let Ok(array) = env.new_double_array(out.len() as i32) else { return std::ptr::null_mut() };
     if env.set_double_array_region(&array, 0, &out).is_err() {
@@ -129,6 +137,14 @@ pub extern "system" fn Java_dev_fpsmonitor_FpsNative_feedThermal<'l>(
         let text: String = text.into();
         state.monitor.feed_thermal(&text);
     }
+}
+
+/// The PUBG versions the monitor recognises, one "package<TAB>name" per line,
+/// in `gameIndex` order. The app builds its on-phone filter and names from it.
+#[no_mangle]
+pub extern "system" fn Java_dev_fpsmonitor_FpsNative_knownGames<'l>(env: JNIEnv<'l>, _class: JClass<'l>) -> jstring {
+    let text: String = GAMES.iter().map(|g| format!("{}\t{}\n", g.package, g.name)).collect();
+    env.new_string(text).map_or(std::ptr::null_mut(), |s| s.into_raw())
 }
 
 /// Smoothed FPS for the last minute (oldest first), for the live graph.
