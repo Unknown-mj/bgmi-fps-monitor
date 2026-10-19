@@ -1,0 +1,7 @@
+title: FPS Monitor for BGMI and PUBG Mobile
+description: >-
+  Free, open-source FPS counter and stutter monitor for BGMI and PUBG Mobile on
+  Android. Shows the game's real frame rate, skipped frames, stutters and phone
+  heat in a floating overlay. Read-only, no root (uses Shizuku).
+theme: jekyll-theme-cayman
+lang: en
