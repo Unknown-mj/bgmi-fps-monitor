@@ -1,0 +1,19 @@
+target/
+# Raw dumps list every app on the phone; keep them local.
+samples/
+
+# Android / Gradle
+.gradle/
+build/
+local.properties
+
+# Built from fps-jni by tools/install-app.ps1
+android/app/src/main/jniLibs/
+
+# Machine-specific paths (see config.toml.example)
+fps-jni/.cargo/config.toml
+
+# Release signing: key and passwords never go in the repository
+android/keystore.properties
+*.jks
+*.keystore

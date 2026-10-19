@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  App icon: a 240° gauge (centre 54,58, radius 22) filled to 80% in neon cyan,
+  with a white needle. Kept inside the 66dp adaptive-icon safe zone.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Track -->
+    <path
+        android:pathData="M34.95,69 A22,22 0 1,1 73.05,69"
+        android:strokeWidth="5"
+        android:strokeColor="#232D3A"
+        android:strokeLineCap="round" />
+    <!-- Glow under the value arc -->
+    <path
+        android:pathData="M34.95,69 A22,22 0 1,1 74.92,51.2"
+        android:strokeWidth="10"
+        android:strokeAlpha="0.25"
+        android:strokeColor="#00E5FF"
+        android:strokeLineCap="round" />
+    <!-- Value arc -->
+    <path
+        android:pathData="M34.95,69 A22,22 0 1,1 74.92,51.2"
+        android:strokeWidth="5"
+        android:strokeColor="#00E5FF"
+        android:strokeLineCap="round" />
+    <!-- Needle -->
+    <path
+        android:pathData="M54,58 L62,44.14"
+        android:strokeWidth="3.5"
+        android:strokeColor="#E6EDF3"
+        android:strokeLineCap="round" />
+    <path
+        android:fillColor="#E6EDF3"
+        android:pathData="M54,58m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+</vector>

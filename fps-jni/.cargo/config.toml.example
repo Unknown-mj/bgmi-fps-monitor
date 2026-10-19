@@ -1,0 +1,13 @@
+# Copy to config.toml and set your NDK path (config.toml is git-ignored).
+# Build with: cargo build --release --target aarch64-linux-android
+# Uses NDK clang.exe directly: the NDK's *-clang.cmd wrapper breaks on the
+# quoted arguments rustc passes on Windows.
+[target.aarch64-linux-android]
+linker = "C:/Users/<you>/AppData/Local/Android/Sdk/ndk/26.3.11579264/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe"
+# --remap-path-prefix keeps your home folder (and so your username) out of
+# the compiled library, which embeds source paths for error messages.
+rustflags = [
+    "-C", "link-arg=--target=aarch64-linux-android31",
+    "--remap-path-prefix=C:\\Users\\<you>=~",
+    "--remap-path-prefix=C:\\path\\to\\fps-monitor=/fps-monitor",
+]

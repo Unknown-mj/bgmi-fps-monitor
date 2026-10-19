@@ -1,0 +1,2 @@
+# Runs on the phone (Android awk): must keep Unix line endings.
+*.awk text eol=lf

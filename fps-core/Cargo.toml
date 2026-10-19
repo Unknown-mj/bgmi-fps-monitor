@@ -1,0 +1,14 @@
+[package]
+name = "fps-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "fps_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fps-dump"
+path = "src/main.rs"
+
+[dependencies]

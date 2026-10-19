@@ -1,0 +1,69 @@
+# Fully automatic A/B test while BGMI stays in front: the PC turns FPS Monitor
+# on and off over adb, times each phase, and compares them with the Rust tool.
+# Off and on phases alternate so the phone slowly heating up affects both.
+#   powershell -ExecutionPolicy Bypass -File tools\ab-auto.ps1 [-Phases "off:90,on500:90,off:90,on1000:90"]
+param([string]$Phases = "off:90,on500:90,off:90,on1000:90")
+$ErrorActionPreference = "Stop"
+$adb  = "$env:USERPROFILE\platform-tools\adb.exe"
+$root = Split-Path $PSScriptRoot -Parent
+$tool = Join-Path $root "fps-core\target\debug\fps-dump.exe"
+$out  = Join-Path $root ("samples\ab-auto-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+New-Item -ItemType Directory -Force $out | Out-Null
+$awkOnPhone = "/data/local/tmp/fps_bgmi.awk"
+$service = "dev.fpsmonitor/.MonitorService"
+
+function Save-Reading($path) {
+    # Same on-phone filter as the app: only BGMI's lines leave the phone.
+    & $adb push (Join-Path $PSScriptRoot "bgmi.awk") $awkOnPhone | Out-Null
+    & $adb exec-out "dumpsys SurfaceFlinger --timestats -dump -maxlayers 20 | awk -f $awkOnPhone" |
+        Out-File -Encoding utf8 $path
+    & $adb shell rm $awkOnPhone
+    [DateTime]::UtcNow
+}
+
+function Get-Heat {
+    $h = & $adb shell "dumpsys thermalservice | grep '^Thermal Status'; dumpsys battery | grep -E '^ +temperature:'"
+    $status = ($h | Select-String 'Thermal Status: (\d+)').Matches.Groups[1].Value
+    $batt = [double]($h | Select-String 'temperature: (\d+)').Matches.Groups[1].Value / 10
+    "heat $status, battery $batt C"
+}
+
+$results = @()
+$n = 0
+foreach ($phase in $Phases.Split(",")) {
+    $n++
+    $name, $secs = $phase.Split(":")
+    $secs = [int]$secs
+    $interval = if ($name -match '^on(\d+)$') { [int]$Matches[1] } else { 0 }
+
+    if ($interval -gt 0) {
+        & $adb shell am start-foreground-service -n $service --ei interval_ms $interval | Out-Null
+        Start-Sleep -Seconds 3   # let it clear stats and settle before measuring
+    }
+    $label = "{0}-{1}" -f $n, $name
+    "[{0}] phase {1}: {2} for {3} s ({4})" -f (Get-Date -Format HH:mm:ss), $n, $name, $secs, (Get-Heat)
+    $t0 = Save-Reading "$out\$label-start.txt"
+    Start-Sleep -Seconds $secs
+    $t1 = Save-Reading "$out\$label-end.txt"
+    if ($interval -gt 0) { & $adb shell am stopservice -n $service | Out-Null }
+
+    $report = & $tool "$out\$label-start.txt" "$out\$label-end.txt" ([math]::Round(($t1 - $t0).TotalSeconds, 2))
+    $report | Out-File -Encoding utf8 "$out\$label-report.txt"
+    $fps = ($report | Select-String 'FPS:\s+([\d.]+) \(target (\d+)\)').Matches
+    $per = ($report | Select-String 'per minute:\s+([\d.]+) skipped, ([\d.]+) stutters').Matches
+    $results += [pscustomobject]@{
+        Phase      = $label
+        Seconds    = [math]::Round(($t1 - $t0).TotalSeconds)
+        FPS        = $fps.Groups[1].Value
+        Target     = $fps.Groups[2].Value
+        Screen     = (($report | Select-String '^screen:\s+(.*)').Matches.Groups[1].Value)
+        SkipPerMin = $per.Groups[1].Value
+        StutPerMin = $per.Groups[2].Value
+        HeatAtEnd  = Get-Heat
+    }
+}
+
+""
+"== Results"
+$results | Format-Table -AutoSize | Out-String -Width 200
+"Readings saved in $out"
