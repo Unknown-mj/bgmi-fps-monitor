@@ -38,13 +38,14 @@ object FpsNative {
     @JvmStatic external fun history(handle: Long): DoubleArray?
 
     /**
-     * Match graph from a session .csv: [POINT_STRIDE] values per point
-     * (t, fpsMin, fpsAvg, fpsMax, stutters, batteryC, cpuC; missing = -1).
+     * Match graph from a session .csv: first value = Rust's point size (must
+     * equal [POINT_STRIDE]), then [POINT_STRIDE] values per point
+     * (t, fpsMin, fpsAvg, fpsMax, stutters, batteryC, cpuC, gpuC; missing = -1).
      * Reads a file, so call it off the main thread.
      */
     @JvmStatic external fun sessionSeries(csvPath: String, maxPoints: Int): DoubleArray?
 
-    const val POINT_STRIDE = 7
+    const val POINT_STRIDE = 8
 
     /** Writes the final summary and frees the session. */
     @JvmStatic external fun destroy(handle: Long)

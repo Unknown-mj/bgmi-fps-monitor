@@ -18,6 +18,8 @@ const OK: f64 = 2.0;
 const RESET: f64 = 3.0;
 /// Stands in for "no value yet" in the returned array.
 const NONE: f64 = -1.0;
+/// Values per point in `sessionSeries`; keep in sync with FpsNative.POINT_STRIDE.
+const POINT_STRIDE: usize = 8;
 
 struct State {
     monitor: Monitor,
@@ -175,8 +177,10 @@ pub extern "system" fn Java_dev_fpsmonitor_FpsNative_history<'l>(
 }
 
 /// Reads a session .csv and returns the match graph as a flat array of
-/// POINT_STRIDE values per point: [t, fpsMin, fpsAvg, fpsMax, stutters,
-/// batteryC, cpuC], missing values -1. Empty if the file can't be read.
+/// first value POINT_STRIDE, then POINT_STRIDE values per point: [t, fpsMin,
+/// fpsAvg, fpsMax, stutters, batteryC, cpuC, gpuC], missing values -1. The
+/// leading size lets the app refuse data laid out for a different version.
+/// Empty if the file can't be read.
 /// Needs no monitor handle, so it is safe from any thread.
 #[no_mangle]
 pub extern "system" fn Java_dev_fpsmonitor_FpsNative_sessionSeries<'l>(
@@ -187,9 +191,10 @@ pub extern "system" fn Java_dev_fpsmonitor_FpsNative_sessionSeries<'l>(
 ) -> jdoubleArray {
     let path: String = env.get_string(&path).map(Into::into).unwrap_or_default();
     let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut flat = Vec::new();
+    let mut flat = vec![POINT_STRIDE as f64];
     for p in session_series(&text, max_points.max(1) as usize) {
-        flat.extend_from_slice(&[
+        // The array type makes the compiler check each point has POINT_STRIDE values.
+        flat.extend_from_slice(&<[f64; POINT_STRIDE]>::from([
             p.t,
             p.fps_min,
             p.fps_avg,
@@ -197,7 +202,8 @@ pub extern "system" fn Java_dev_fpsmonitor_FpsNative_sessionSeries<'l>(
             p.stutters as f64,
             p.battery_c.unwrap_or(NONE),
             p.cpu_c.unwrap_or(NONE),
-        ]);
+            p.gpu_c.unwrap_or(NONE),
+        ]));
     }
     double_array(&env, &flat)
 }

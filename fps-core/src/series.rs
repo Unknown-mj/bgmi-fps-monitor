@@ -16,6 +16,8 @@ pub struct Point {
     pub battery_c: Option<f64>,
     /// Hottest CPU reading in the slice.
     pub cpu_c: Option<f64>,
+    /// Hottest GPU reading in the slice.
+    pub gpu_c: Option<f64>,
 }
 
 struct Row {
@@ -24,6 +26,14 @@ struct Row {
     stutters: u64,
     battery_c: Option<f64>,
     cpu_c: Option<f64>,
+    gpu_c: Option<f64>,
+}
+
+fn hottest(a: Option<f64>, b: Option<f64>) -> Option<f64> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (a, b) => a.or(b),
+    }
 }
 
 /// Reads columns by header name, so older logs without heat columns still work.
@@ -35,7 +45,7 @@ fn parse_rows(csv: &str) -> Vec<Row> {
     let (Some(t_i), Some(status_i), Some(fps_i)) = (col("elapsed_s"), col("status"), col("fps")) else {
         return Vec::new();
     };
-    let (stutters_i, battery_i, cpu_i) = (col("stutters"), col("battery_c"), col("cpu_c"));
+    let (stutters_i, battery_i, cpu_i, gpu_i) = (col("stutters"), col("battery_c"), col("cpu_c"), col("gpu_c"));
 
     lines
         .filter_map(|line| {
@@ -50,6 +60,7 @@ fn parse_rows(csv: &str) -> Vec<Row> {
                 stutters: stutters_i.and_then(|i| f.get(i)).and_then(|v| v.parse().ok()).unwrap_or(0),
                 battery_c: num(battery_i),
                 cpu_c: num(cpu_i),
+                gpu_c: num(gpu_i),
             })
         })
         .collect()
@@ -82,6 +93,7 @@ pub fn session_series(csv: &str, max_points: usize) -> Vec<Point> {
                 stutters: 0,
                 battery_c: None,
                 cpu_c: None,
+                gpu_c: None,
             });
             sums.push((0.0, 0));
         }
@@ -91,10 +103,8 @@ pub fn session_series(csv: &str, max_points: usize) -> Vec<Point> {
         p.fps_max = p.fps_max.max(row.fps);
         p.stutters += row.stutters;
         p.battery_c = row.battery_c.or(p.battery_c);
-        p.cpu_c = match (p.cpu_c, row.cpu_c) {
-            (Some(a), Some(b)) => Some(a.max(b)),
-            (a, b) => a.or(b),
-        };
+        p.cpu_c = hottest(p.cpu_c, row.cpu_c);
+        p.gpu_c = hottest(p.gpu_c, row.gpu_c);
         s.0 += row.fps;
         s.1 += 1;
     }
@@ -164,6 +174,27 @@ mod tests {
         assert_eq!(s.len(), 1);
         assert_eq!(s[0].stutters, 2);
         assert_eq!(s[0].cpu_c, None);
+    }
+
+    #[test]
+    fn gpu_keeps_the_hottest_reading_in_each_slice() {
+        let row = |t: f64, gpu: &str| format!("{t:.3},ok,120.0,120.0,120,60,0,0,0,1,38.0,60.0,{gpu},");
+        // 400 readings shrunk to 2 slices: the second half has one hot GPU reading.
+        let rows = (1..=400).map(|i| row(i as f64 * 0.5, if i == 300 { "82.0" } else { "60.0" }));
+        let s = session_series(&csv(rows), 2);
+        assert_eq!(s.len(), 2);
+        assert_eq!(s[0].gpu_c, Some(60.0));
+        assert_eq!(s[1].gpu_c, Some(82.0));
+    }
+
+    #[test]
+    fn logs_from_before_gpu_logging_have_no_gpu() {
+        let text = "elapsed_s,status,fps,smooth_fps,target_fps,frames,skipped,stutters,long_pauses,\
+                    heat_status,battery_c,cpu_c,skin_c\n\
+                    0.5,ok,117.0,117.0,120,59,0,0,0,1,37.0,55.0,40.0";
+        let s = session_series(text, 200);
+        assert_eq!(s[0].cpu_c, Some(55.0));
+        assert_eq!(s[0].gpu_c, None);
     }
 
     #[test]

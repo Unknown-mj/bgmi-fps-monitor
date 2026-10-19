@@ -14,6 +14,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -411,18 +414,23 @@ class MainActivity : Activity() {
             addView(spaced(hint, 8f))
         }
 
-        var graph: Graph? = null
+        var chart: View? = null
         card.setOnClickListener {
-            graph?.let {
+            chart?.let {
                 card.removeView(it)
-                graph = null
+                chart = null
                 hint.text = "TAP FOR GRAPH"
                 return@setOnClickListener
             }
-            val g = Graph(this, accent.color, heightDp = 130f)
-            graph = g
-            hint.text = "FPS (BAND = LOWEST–HIGHEST) · RED DOTS = STUTTERS · ORANGE = BATTERY °C"
-            card.addView(spaced(g, 8f))
+            val g = SessionChart(this, accent.color)
+            val block = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(g)
+                addView(spaced(chartLegend(), 6f))
+            }
+            chart = block
+            hint.text = "DRAG ON THE GRAPH TO READ VALUES · TAP CARD TO CLOSE"
+            card.addView(spaced(block, 8f))
             // Rust reads and shrinks the log; keep the file work off the main thread.
             thread {
                 val series = FpsNative.sessionSeries(s.csv.path, GRAPH_POINTS) ?: DoubleArray(0)
@@ -430,6 +438,21 @@ class MainActivity : Activity() {
             }
         }
         return card
+    }
+
+    /** "● FPS ● BAT ● CPU ● GPU ● stutter", each dot in its line colour. */
+    private fun chartLegend(): TextView {
+        val entries = listOf("FPS" to accent.color) +
+            SessionChart.TEMP_LABELS.zip(SessionChart.TEMP_COLORS.toList()) +
+            listOf("STUTTER" to Theme.BAD)
+        val text = SpannableStringBuilder()
+        for ((name, color) in entries) {
+            val start = text.length
+            text.append("● ")
+            text.setSpan(ForegroundColorSpan(color), start, start + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            text.append(name).append("   ")
+        }
+        return label("", 11f).apply { this.text = text }
     }
 
     // ---------------------------------------------------------------- settings tab
